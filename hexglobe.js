@@ -38,6 +38,9 @@ const a = Math.sqrt(phi + 1);
 const b = rho * a;
 const c = rho / (a);
 
+const theta = Math.asin(Math.sqrt((phi - b) * (phi - b) + 1 + c * c) / r);
+const ang = Math.asin(1 / r);
+
 const sign = [-1, 1];
 const steps = 10;
 const basis = [
@@ -45,6 +48,8 @@ const basis = [
 	new THREE.Vector3(0, 1, 0),
 	new THREE.Vector3(0, 0, 1),
 ];
+
+const borderMaterial = new THREE.MeshPhongMaterial({color:0x0000cc})
 
 function arcPoints(vertices, segments) {
 	const points = [];
@@ -63,6 +68,33 @@ function arcPoints(vertices, segments) {
 	}
 	points.push(vertices[vertices.length - 1]);
 	return points;
+}
+
+function createArc(base, end) {
+	const torusMesh = new THREE.TorusGeometry(r, .05, 90, 60, theta);
+	;
+	
+	const normal = new THREE.Vector3().crossVectors(base, end).normalize();
+	const binormal = new THREE.Vector3().crossVectors(normal, base).normalize();
+	const dir = base.clone().normalize();
+	
+	const mat = new THREE.Matrix4().set(
+		dir.x, binormal.x, normal.x, 0,
+		dir.y, binormal.y, normal.y, 0,
+		dir.z, binormal.z, normal.z, 0,
+		0, 0, 0, 1
+	);
+	
+	torusMesh.applyMatrix4(mat);
+	
+	return new THREE.Mesh(torusMesh, borderMaterial);
+}
+
+function createPointBallsMeshes(points, radius) {
+	return points.map(v => new THREE.Mesh(
+		new THREE.SphereGeometry(radius).translate(v.x, v.y, v.z),
+		borderMaterial
+	));
 }
 
 function createD30Mesh() {
@@ -95,48 +127,39 @@ function createD30Mesh() {
 
 	let ijk = [0, 0, 0];
 
-	const lines = [];
-	const whiteMaterial = new THREE.LineBasicMaterial( { color: 0xffffff});
-	const redMaterial = new THREE.LineBasicMaterial({color: 0xff0000});
-	for (let s_0 = 0; s_0 < 3; s_0++) {
-		const s_1 = (s_0 + 1) % 3;
-		const s_2 = (s_0 + 2) % 3;
-		for (ijk[s_0] = 0; ijk[s_0] < 2; ijk[s_0]++) {
-			// While just rendering edges, this is not needed.
-			/*const icosEdgeFace = new THREE.BufferGeometry().
-				setFromPoints([
-					icosPoints[4 * s_0 + 2 * ijk[s_0]], 
-					dualPoints[4 * s_2 + ijk[s_0]],
-					icosPoints[4 * s_0 + 2 * ijk[s_0] + 1],
-					dualPoints[4 * s_2 + 2 + ijk[s_0]],
-					icosPoints[4 * s_0 + 2 * ijk[s_0]]
-			]);
-			lines.push(new THREE.Line(icosEdgeFace, whiteMaterial));*/
-			
-			for (ijk[s_1] = 0; ijk[s_1] < 2; ijk[s_1]++) {
-				for (ijk[s_2] = 0; ijk[s_2] < 2; ijk[s_2]++) {
-					const cubeIdx = 4 * ijk[0] + 2 * ijk[1] + ijk[2];
-					const cubeHalfEdgeFace = new THREE.BufferGeometry().
-						setFromPoints(
-							arcPoints([
-								cubePoints[cubeIdx], 
-								icosPoints[4 * s_0 + 2 * ijk[s_1] + ijk[s_2]],
-								dualPoints[4 * s_0 + 2 * ijk[s_1] + ijk[s_2]],
-								icosPoints[4 * s_1 + 2 * ijk[s_2] + ijk[s_0]],
-								cubePoints[cubeIdx]], 20
-							)
-						);
-					lines.push(new THREE.Line(cubeHalfEdgeFace, redMaterial));
-				}
-			}
-		}		
-	}
+	const arcs = [];
 	
-	return lines;
+	//to create edges, it is sufficient to generate based at each icos point
+	icosPoints.forEach((v, n) => {
+		const s = Math.floor(n / 4);
+		const s_1 = (s + 1) % 3;
+		const s_2 = (s + 2) % 3;
+		const j = ((n - 4 * s) & 2) >> 1;
+		const k = ((n - 4 * s) & 1);
+		const cornerIdx = j * (1 << (2 - s_1)) + k * (1 << (2 - s_2));
+		arcs.push(
+			createArc(v, dualPoints[n]),
+			createArc(v, dualPoints[4 * s_2 + j]),
+			createArc(v, dualPoints[4 * s_2 + j + 2]),
+			createArc(v, cubePoints[cornerIdx]),
+			createArc(v, cubePoints[cornerIdx + (1 << (2 - s))])
+		);
+	});
+
+	const globe = new THREE.Mesh(new THREE.SphereGeometry(r), new THREE.MeshLambertMaterial({color:0x008800}))
+	const spheres = createPointBallsMeshes([...icosPoints, ...dualPoints, ...cubePoints], 0.1);
+	return [globe,...spheres, ...arcs];
 }
 
 const lines = createD30Mesh();
 scene.add(...lines);
+
+const ambientLight = new THREE.AmbientLight( 0x808080, 0.4);
+const pointLight = new THREE.PointLight(0xbbbb00, 2);
+pointLight.position.set(- 2 * r, 1, 2 * r);
+const spotLight = new THREE.SpotLight(0xdddddd, 3);
+spotLight.position.set(2 * r, 0, 2 * r);
+scene.add(ambientLight, pointLight, spotLight);
 
 const animate = function () {
 	requestAnimationFrame( animate );
